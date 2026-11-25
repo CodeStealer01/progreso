@@ -95,6 +95,9 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
 .sr2 button[data-a=inc],.sr2 button[data-a=dec]{height:36px;border:0;border-radius:10px;background:var(--track);color:var(--ink);font:800 18px Manrope,system-ui,sans-serif;cursor:pointer}
 .sr2 .rm{border:0;background:none;color:var(--mute);font-size:18px;cursor:pointer}
 .addS{margin-top:4px;height:40px;width:100%;border:1px dashed var(--line);border-radius:12px;background:none;color:var(--ink);font:700 14px Manrope,system-ui,sans-serif;cursor:pointer}
+.undo{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translate(-50%,20px);opacity:0;pointer-events:none;display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:8px 8px 8px 16px;font-weight:700;font-size:14px;white-space:nowrap;transition:opacity .3s,transform .3s cubic-bezier(.22,1,.36,1);z-index:9}
+.undo.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.undo button{height:40px;padding:0 16px;border:0;border-radius:12px;background:var(--ink);color:var(--bg);font:800 14px Manrope,system-ui,sans-serif;cursor:pointer}
 .hint{color:var(--mute);text-align:center;font-size:15px;line-height:1.5;padding:24px 12px}.hint b{color:var(--ink)}
 .actions .del{color:#e5484d}
 .actions .del.arm{background:#e5484d;color:#fff}
@@ -153,6 +156,7 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
   <section class="summary" id="summary" hidden></section>
 </main>
 <div class="gname" id="gname"></div>
+<div class="undo" id="undo" role="status"><span></span><button type="button" id="undoBtn">Deshacer</button></div>
 
 <div class="scrim" id="scrim"></div>
 <form class="sheet" id="sheet" autocomplete="off">
@@ -263,6 +267,29 @@ try{
       if(old)tasks=tasks.filter(t=>t!==old);
     }
     localStorage.setItem(KEY,JSON.stringify(tasks));localStorage.setItem('progreso.asig2','1');localStorage.setItem('progreso.asig1','1');
+  }
+}catch(e){}
+/* restauración (una sola vez): vuelve a crear las ruedas predeterminadas que falten */
+try{
+  if(!localStorage.getItem('progreso.restore1')){
+    let nid=Math.max(2000,...tasks.map(t=>+t.id||0))+1;
+    const ensure=(o)=>{if(!tasks.some(t=>t.group===o.group&&t.name===o.name))tasks.push({id:nid++,log:[],once:false,...o})};
+    ensure({name:'Gimnasio',icon:'pesa',color:'#ff375f',goal:1,unit:'sesión',group:'Hábitos',period:'dia',once:true});
+    ensure({name:'Creatina',icon:'pastilla',color:'#64d2ff',goal:1,unit:'toma',group:'Hábitos',period:'dia',once:true});
+    const SUBJ=[
+      ['Cálculo Teoría','calculo','#0a84ff',[['Límites',10],['Derivadas',29]]],
+      ['Cálculo Práctica','calculo','#64d2ff',[['Sesión 5',4],['Sesión 6',12],['Sesión 7',6],['Sesión 8',4],['Sesión 9',20]]],
+      ['FS Teoría','chip','#bf5af2',[['Tema 3',16],['Problemas',1]]],
+      ['FS Práctica','chip','#ff6482',[['Sesión 4',4],['Sesión 5',8],['Sesión 6',4]]],
+      ['FP','codigo','#30d158',[['Sesión 7',7],['Sesión 8',10],['Sesión 9',13]]],
+      ['FFT','atomo','#ff9f0a',[['Sesión 2',6],['Sesión 3',7],['Sesión 4',5],['Sesión 5',7],['Sesión 6',5],['Sesión 7',7],['Sesión 8',5],['Sesión 10',5],['Sesión 12',4]]]
+    ];
+    for(const [g,icon,color,ses] of SUBJ)for(const [name,n] of ses)ensure({name,icon,color,goal:n,unit:'apartados',group:g,period:'total'});
+    /* orden: Hábitos primero y luego las asignaturas en el orden de la lista */
+    const order=['Hábitos',...SUBJ.map(x=>x[0])];
+    tasks.sort((p,q)=>{const a=order.indexOf(p.group),b=order.indexOf(q.group);return (a<0?99:a)-(b<0?99:b)});
+    localStorage.removeItem('progreso.fix1');   /* vuelve a aplicar los registros del lunes y martes */
+    localStorage.setItem(KEY,JSON.stringify(tasks));localStorage.setItem('progreso.restore1','1');
   }
 }catch(e){}
 /* corrección puntual (se aplica una sola vez): registros de la semana 1 */
@@ -529,8 +556,14 @@ function openMenu(b){closeMenu();menuBtn=b;b.classList.add('showname');b.closest
 function closeMenu(){if(!menuBtn)return;const pg=menuBtn.closest('.page');menuBtn.classList.remove('showname');
   if(pg){pg.classList.remove('menuon');const d=pg.querySelector('.mdel');if(d){d.classList.remove('arm');d.textContent='Eliminar'}}menuBtn=null}
 let lastTap=null;
+let undoT=null,lastDel=null;
+function showUndo(t){
+  const u=$('undo');u.querySelector('span').textContent=`«${t.name}» eliminada`;
+  u.classList.add('on');clearTimeout(undoT);undoT=setTimeout(()=>{u.classList.remove('on');lastDel=null},6000);
+}
 function removeTask(t){const g=t.group,i=tasks.filter(x=>x.group===g).indexOf(t);
-  tasks=tasks.filter(x=>x!==t);save();posBy[g]=Math.max(0,i-1);
+  lastDel={t,at:tasks.indexOf(t)};
+  tasks=tasks.filter(x=>x!==t);save();showUndo(t);posBy[g]=Math.max(0,i-1);
   const nv=views().indexOf(g);vi=nv>=0?nv:Math.min(vi,views().length-1);render()}
 function vel1(now,axis){
   const rec=track.filter(s=>now-s[0]<=100);if(rec.length<2)return 0;
@@ -739,6 +772,9 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)return;
   if(dayStart()!==today){checkDay();return}
   if(!$('sheet').classList.contains('on'))render()});
 addEventListener('pageshow',checkDay);
+$('undoBtn').addEventListener('click',()=>{if(!lastDel)return;const {t,at}=lastDel;lastDel=null;
+  tasks.splice(Math.min(at,tasks.length),0,t);save();$('undo').classList.remove('on');
+  vi=views().indexOf(t.group);posBy[t.group]=tasks.filter(x=>x.group===t.group).indexOf(t);render();flashName()});
 addEventListener('focus',checkDay);
 addEventListener('resize',()=>{measure();draw()});
 measure();render();flashName();
