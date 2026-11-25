@@ -175,9 +175,10 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
 <div class="scrim" id="scrim"></div>
 <div class="sheet gsheet" id="gsheet" role="dialog" aria-label="Objetivo semanal">
   <div class="grab"></div>
-  <div class="head"><h2>Objetivo semanal</h2></div>
-  <p class="gsub">Apartados por semana, sumando todas las asignaturas.</p>
-  <div class="step"><button type="button" id="gMinus" aria-label="Bajar">−</button><span id="gVal">10</span><button type="button" id="gPlus" aria-label="Subir">+</button></div>
+  <div class="head"><h2 id="gTitle">Objetivo</h2></div>
+  <p class="gsub" id="gInfo"></p>
+  <label for="gDate">Terminar antes del</label>
+  <input id="gDate" type="date">
   <div class="actions"><button type="button" class="save" id="gSave">Guardar</button></div>
 </div>
 <form class="sheet" id="sheet" autocomplete="off">
@@ -377,26 +378,50 @@ const mondayAgo=(k)=>addDays(monday(),-7*k);
 const inRange=(t,a,b)=>{let n=0;for(const x of t.log)if(x>=a&&x<b)n++;return n};
 function isoWeek(t){const d=new Date(t);d.setHours(0,0,0,0);d.setDate(d.getDate()+3-((d.getDay()+6)%7));
   const w1=new Date(d.getFullYear(),0,4);return 1+Math.round(((d-w1)/DAY-3+((w1.getDay()+6)%7))/7)}
-/* ===== objetivo semanal de estudio (apartados de todas las asignaturas) ===== */
-const MKEY='progreso.meta';
-let STUDY=10;try{STUDY=+localStorage.getItem(MKEY)||10}catch(e){}
+/* ===== objetivos de estudio con fecha límite =====
+   Cada lunes calcula cuántos apartados tocan esa semana: lo que falta ÷ días que quedan × 7. */
+const GKEY='progreso.metas';
+const DEF_GOALS=[
+  {id:'dic',name:'Diciembre',icon:'estudio',color:'#0a84ff',groups:null,deadline:new Date(2026,11,14).getTime()},
+  {id:'fis',name:'Física',icon:'atomo',color:'#ff9f0a',groups:['FFT'],deadline:new Date(2027,0,20).getTime()}
+];
+let GOALS=null;try{GOALS=JSON.parse(localStorage.getItem(GKEY))}catch(e){}
+if(!Array.isArray(GOALS))GOALS=DEF_GOALS;
+const saveGoals=()=>{try{localStorage.setItem(GKEY,JSON.stringify(GOALS))}catch(e){}};
 const studyTasks=()=>tasks.filter(t=>t.period==='total');
-function studyIn(a,b){let n=0;for(const t of studyTasks())n+=inRange(t,a,b);return n}
-const studyWeek=(m)=>studyIn(m,addDays(m,7));
+function goalTasks(g){
+  const taken=GOALS.filter(x=>x.groups).flatMap(x=>x.groups);
+  return studyTasks().filter(t=>g.groups?g.groups.includes(t.group):!taken.includes(t.group));
+}
+const goalOf=(t)=>t.period!=='total'?null:GOALS.find(g=>goalTasks(g).includes(t))||null;
+function gIn(g,a,b){let n=0;for(const t of goalTasks(g))n+=inRange(t,a,b);return n}
+const gTotal=(g)=>goalTasks(g).reduce((a,t)=>a+t.goal,0);
+const gBefore=(g,m)=>{let n=0;for(const t of goalTasks(g))for(const x of t.log)if(x<m)n++;return n};
+/* objetivo de la semana que empieza en m (null si el plazo ya pasó o no queda nada) */
+function gWeekly(g,m){
+  const days=Math.round((dayStart(new Date(g.deadline))-m)/DAY);
+  if(days<=0||!goalTasks(g).length)return null;
+  const rem=Math.max(0,gTotal(g)-gBefore(g,m));
+  if(!rem)return null;
+  return days<=7?rem:Math.ceil(rem/days*7);
+}
+const gWeek=(g,m)=>gIn(g,m,addDays(m,7));
+const activeGoals=(m)=>GOALS.map(g=>({g,w:gWeekly(g,m)})).filter(x=>x.w);
 function weekPctFor(m){
-  const base=weekPctBase(m),st=studyTasks().length;
-  if(!st)return base;
-  const sp=Math.min(1,studyWeek(m)/STUDY)*100,nh=tasks.filter(t=>t.period!=='total').length;
-  if(!nh)return Math.round(sp);
-  return Math.round((base*nh+sp)/(nh+1));
+  const base=weekPctBase(m),nh=tasks.filter(t=>t.period!=='total').length,ag=activeGoals(m);
+  const vals=ag.map(({g,w})=>Math.min(1,gWeek(g,m)/w)*100);
+  const n=nh+vals.length;if(!n)return 0;
+  return Math.round((base*nh+vals.reduce((a,b)=>a+b,0))/n);
 }
 /* puntuación de la semana sin tope: los apartados de más hacen pasar del 100 % */
 function weekScore(m){
-  const base=weekPctBase(m),st=studyTasks().length,nh=tasks.filter(t=>t.period!=='total').length;
-  if(!st)return base;
-  const sp=studyWeek(m)/STUDY*100;
-  return Math.round(nh?(base*nh+sp)/(nh+1):sp);
+  const base=weekPctBase(m),nh=tasks.filter(t=>t.period!=='total').length,ag=activeGoals(m);
+  const vals=ag.map(({g,w})=>gWeek(g,m)/w*100);
+  const n=nh+vals.length;if(!n)return 0;
+  return Math.round((base*nh+vals.reduce((a,b)=>a+b,0))/n);
 }
+function weekMedal(m){const ag=activeGoals(m);if(!ag.length)return false;
+  return ag.every(({g,w})=>gWeek(g,m)>=w)&&ag.some(({g,w})=>gWeek(g,m)>w)}
 const LAPS=['var(--ink)','#ffd60a','#30d158','#64d2ff','#bf5af2','#ff375f','#ff9f0a'];
 function lapsSvg(score){
   const n=Math.max(1,Math.ceil(score/100));
@@ -450,24 +475,29 @@ function renderSummary(){
   /* desde la semana 1 (inicio) hasta la actual: cada lunes aparece una nueva */
   const N=Math.max(1,Math.round((monday()-START)/(7*DAY))+1);
   const weeks=Array.from({length:N},(_,i)=>{const kk=N-1-i,mm=mondayAgo(kk),p=Math.min(100,weekScore(mm));
-    return `<button type="button" class="wk ${kk===k?'sel':''} ${p>=100?'full':''}" data-k="${kk}" data-p="${p}" aria-label="Semana ${relWeek(mm)}, ${p}%"><div class="mini">${ring()}</div><span>S${relWeek(mm)}${studyTasks().length&&studyWeek(mm)>STUDY?'<b class="medal">★</b>':''}</span></button>`}).join('');
+    return `<button type="button" class="wk ${kk===k?'sel':''} ${p>=100?'full':''}" data-k="${kk}" data-p="${p}" aria-label="Semana ${relWeek(mm)}, ${p}%"><div class="mini">${ring()}</div><span>S${relWeek(mm)}${weekMedal(mm)?'<b class="medal">★</b>':''}</span></button>`}).join('');
   const DL='LMXJVSD'.split('').map(c=>`<i>${c}</i>`).join('');
   const sub=k===0?`semana ${relWeek(m)}`:`semana ${relWeek(m)}<br>${fmtD(m)} – ${fmtD(addDays(m,6))}`;
   const stats=new Map(tasks.map(t=>[t,weekStat(t,k)]));
   summary.innerHTML=`<div class="big ${wp>100?'bonusring':''}">${lapsSvg(wp)}<div class="num"><b>${wp}%</b><span>${sub}</span>${k?'<em>Volver a esta semana</em>':''}</div></div>
    <div class="weeks">${weeks}</div>
-   <div class="list">${studyTasks().length?(()=>{const n=studyWeek(m),extra=Math.max(0,n-STUDY);
-     const dd=Array.from({length:7},(_,i)=>{const a=addDays(m,i);return `<i class="${studyIn(a,addDays(a,1))?'on':''} ${i===todayI?'today':''}"></i>`}).join('');
-     return `<div class="gh"><span></span><span>Objetivo semanal</span><span class="dl">${DL}</span></div>
-     <div class="srow study" style="--c:var(--ink)" data-study="1"><div class="mini">${ring()}<span class="ico">${svg('estudio')}</span></div>
-       <div><div class="nm">Estudio</div><div class="ct">${n}/${STUDY} apartados${extra?` <b class="bonus">★ +${extra}</b>`:''}<br>toca para cambiar el objetivo</div></div><div class="dots">${dd}</div></div>`})():''}${tasks.length?'':'<p class="hint">Aún no tienes ruedas. Desliza hacia arriba y toca el <b>+</b> para crear la primera.</p>'}${(tasks.length?groups():[]).map(g=>`<div class="gh"><span></span><span>${esc(g)}</span><span class="dl">${DL}</span></div>`+
+   <div class="list">${(()=>{if(!studyTasks().length)return '';
+     const now=dayStart();
+     return `<div class="gh"><span></span><span>Objetivos semanales</span><span class="dl">${DL}</span></div>`+GOALS.map(g=>{
+       const w=gWeekly(g,m),n=gWeek(g,m),extra=w?Math.max(0,n-w):0,left=Math.round((dayStart(new Date(g.deadline))-now)/DAY),rem=Math.max(0,gTotal(g)-gBefore(g,Infinity));
+       const dd=Array.from({length:7},(_,i)=>{const a=addDays(m,i);return `<i class="${gIn(g,a,addDays(a,1))?'on':''} ${i===todayI?'today':''}"></i>`}).join('');
+       const l1=w?`${n}/${w} apartados${extra?` <b class="bonus">★ +${extra}</b>`:''}`:(rem?`${n} apartados`:'Todo terminado ✓');
+       const l2=left>0?`faltan ${left} ${left===1?'día':'días'} · quedan ${rem}`:'plazo terminado';
+       return `<div class="srow study" style="--c:${g.color}" data-goal="${g.id}" data-p="${w?Math.min(100,Math.round(n/w*100)):(rem?0:100)}"><div class="mini">${ring()}<span class="ico">${svg(g.icon)}</span></div>
+         <div><div class="nm">${esc(g.name)}</div><div class="ct">${l1}<br>${l2}</div></div><div class="dots">${dd}</div></div>`}).join('')})()}
+${tasks.length?'':'<p class="hint">Aún no tienes ruedas. Desliza hacia arriba y toca el <b>+</b> para crear la primera.</p>'}${(tasks.length?groups():[]).map(g=>`<div class="gh"><span></span><span>${esc(g)}</span><span class="dl">${DL}</span></div>`+
      tasks.filter(t=>t.group===g).map(t=>`<div class="srow" style="--c:${t.color}"><div class="mini">${ring()}<span class="ico">${svg(t.icon)}</span></div>
        <div><div class="nm">${esc(t.name)}</div><div class="ct">${stats.get(t).txt}</div></div><div class="dots">${dots(t)}</div></div>`).join('')).join('')}</div>`;
   const wr=summary.querySelector('.weeks');
   wr.scrollLeft=prevScroll!=null?prevScroll:wr.scrollWidth;
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     summary.querySelectorAll('.big .lap').forEach(c=>c.style.strokeDashoffset=off(+c.dataset.p));
-    const sr=summary.querySelector('.study');if(sr){sr.querySelector('.pr').style.strokeDashoffset=off(Math.min(100,studyWeek(m)/STUDY*100))}
+    summary.querySelectorAll('.study').forEach(r=>{r.querySelector('.pr').style.strokeDashoffset=off(+r.dataset.p)});
     summary.querySelectorAll('.wk .pr').forEach(c=>c.style.strokeDashoffset=off(+c.closest('.wk').dataset.p));
     const rows=summary.querySelectorAll('.srow:not(.study) .pr');let i=0;
     for(const g of groups())for(const t of tasks.filter(t=>t.group===g)){rows[i++].style.strokeDashoffset=off(stats.get(t).p)}
@@ -496,8 +526,8 @@ function paint(t){
   b.classList.toggle('done',pct(t)>=100);
   const sl=b.querySelector('.sl');if(sl)sl.textContent=sLine(t);
 }
-function celebrate(){
-  const k='progreso.bonus.'+monday();try{if(localStorage.getItem(k))return;localStorage.setItem(k,'1')}catch(e){}
+function celebrate(id){
+  const k='progreso.bonus.'+id+'.'+monday();try{if(localStorage.getItem(k))return;localStorage.setItem(k,'1')}catch(e){}
   const c=document.createElement('div');c.className='burst';
   c.innerHTML=Array.from({length:14},(_,i)=>`<i style="--a:${i*360/14}deg;--d:${(i%3)*60}ms"></i>`).join('')+'<b>★<span>¡Objetivo superado!</span></b>';
   c.addEventListener('animationend',e=>{if(e.target===c)c.remove()});
@@ -712,9 +742,9 @@ pager.addEventListener('click',e=>{
   const bb=b.getBoundingClientRect();
   const x=e.clientX||bb.left+bb.width/2,y=e.clientY||bb.top+bb.height/2,u=t.unit?' '+t.unit:'';
   const now=performance.now();
-  const before=t.period==='total'?studyWeek(monday()):-1;
+  const gg=goalOf(t),gw=gg?gWeekly(gg,monday()):null,before=gw?gWeek(gg,monday()):-1;
   const r=bump(t,1);
-  if(before>=0&&(r==='ok'||(r.startsWith&&r.startsWith('session:')))&&before===STUDY)celebrate();
+  if(before>=0&&(r==='ok'||(r.startsWith&&r.startsWith('session:')))&&before===gw)celebrate(gg.id);
   if(r==='ok'){floatAt(x,y,t,'+1'+u);b.classList.add('pulse');setTimeout(()=>b.classList.remove('pulse'),180)}
   else if(r.startsWith&&r.startsWith('session:')){floatAt(x,y,t,r.slice(8)+' completada ✓');b.classList.add('pulse');setTimeout(()=>b.classList.remove('pulse'),180)}
   else{floatAt(x,y,t,r==='today'?'Hoy ya ✓':'Completado ✓');b.classList.remove('shake');void b.offsetWidth;b.classList.add('shake')}
@@ -722,7 +752,7 @@ pager.addEventListener('click',e=>{
 summary.addEventListener('click',e=>{
   const wk=e.target.closest('.wk');
   if(wk){const k=+wk.dataset.k;selK=selK===k?0:k;renderSummary();if(navigator.vibrate)navigator.vibrate(8);return}
-  if(e.target.closest('.study')){openGoal();return}
+  const gr=e.target.closest('.study');if(gr){openGoal(gr.dataset.goal);return}
   if(e.target.closest('.big')&&selK){selK=0;renderSummary();
     const wr=summary.querySelector('.weeks');wr.scrollTo({left:wr.scrollWidth,behavior:'smooth'});return}
   if(dragged){dragged=false;return}
@@ -793,11 +823,19 @@ function open(id){
 }
 function close(){$('sheet').classList.remove('on');$('scrim').classList.remove('on');if(document.activeElement)document.activeElement.blur();editing=null}
 $('scrim').addEventListener('click',()=>{close();$('gsheet').classList.remove('on')});
-let gTmp=STUDY;
-function openGoal(){gTmp=STUDY;$('gVal').textContent=gTmp+' apartados';$('gsheet').classList.add('on');$('scrim').classList.add('on')}
-$('gMinus').addEventListener('click',()=>{gTmp=Math.max(1,gTmp-1);$('gVal').textContent=gTmp+' apartados'});
-$('gPlus').addEventListener('click',()=>{gTmp=Math.min(200,gTmp+1);$('gVal').textContent=gTmp+' apartados'});
-$('gSave').addEventListener('click',()=>{STUDY=gTmp;try{localStorage.setItem(MKEY,STUDY)}catch(e){}
+let gEdit=null;
+const isoD=(t)=>{const d=new Date(t);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+function openGoal(id){
+  gEdit=GOALS.find(g=>g.id===id);if(!gEdit)return;
+  const groupsTxt=[...new Set(goalTasks(gEdit).map(t=>t.group))].join(', ');
+  $('gTitle').textContent=gEdit.name;
+  $('gInfo').textContent=`${groupsTxt}. ${gTotal(gEdit)} apartados en total. El objetivo de cada semana se calcula solo con lo que te falta y los días que quedan.`;
+  $('gDate').value=isoD(gEdit.deadline);
+  $('gsheet').style.setProperty('--pick',gEdit.color);
+  $('gsheet').classList.add('on');$('scrim').classList.add('on');
+}
+$('gSave').addEventListener('click',()=>{
+  if(gEdit&&$('gDate').value){const [y,mo,d]=$('gDate').value.split('-').map(Number);gEdit.deadline=new Date(y,mo-1,d).getTime();saveGoals()}
   $('gsheet').classList.remove('on');$('scrim').classList.remove('on');renderSummary()});
 $('sheet').addEventListener('submit',e=>{
   e.preventDefault();
