@@ -53,7 +53,8 @@ body{background:var(--bg);color:var(--ink);font:16px/1.45 Manrope,system-ui,-app
 .menu{position:absolute;left:50%;top:calc(50% + var(--s)*.285);display:flex;gap:8px;transform:translate(-50%,8px);opacity:0;pointer-events:none;transition:opacity .3s cubic-bezier(.22,1,.36,1),transform .3s cubic-bezier(.22,1,.36,1);z-index:2}
 .menuon .menu{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 .menu button{height:40px;padding:0 16px;border:0;border-radius:20px;background:var(--track);color:var(--ink);font:800 14px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
-.menu .mdel{color:#e5484d}.menu .mdel.arm{background:#e5484d;color:#fff}
+.menu .mdel{color:#e5484d}
+.menu button[data-m=minus]{min-width:52px;font-size:16px}.menu .mdel.arm{background:#e5484d;color:#fff}
 .menuon .ringbtn{animation-play-state:paused}
 .float{position:fixed;z-index:5;pointer-events:none;font:800 20px/1 Manrope,system-ui,sans-serif;color:var(--c);white-space:nowrap;transform:translate(-50%,-50%);animation:flo .9s ease-out forwards}
 @keyframes flo{0%{opacity:0;transform:translate(-50%,-50%) scale(.85)}15%{opacity:1;transform:translate(-50%,-70%) scale(1)}100%{opacity:0;transform:translate(-50%,-180%)}}
@@ -238,21 +239,30 @@ let START=null;try{START=+localStorage.getItem(SKEY)||null}catch(e){}
 if(!START){START=monday();try{localStorage.setItem(SKEY,START)}catch(e){}}
 const relWeek=(m)=>Math.round((m-START)/(7*DAY))+1;
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(tasks))}catch(e){}};
-/* asignaturas del curso (se añaden una sola vez) */
+/* asignaturas: un grupo por asignatura y una rueda por sesión (se aplica una sola vez).
+   Si existían las ruedas combinadas anteriores, sus apartados marcados pasan a la rueda de su sesión. */
 try{
-  if(!localStorage.getItem('progreso.asig1')){
-    const S=(...a)=>a.map(([name,n])=>({name,n}));
-    const mk=(id,name,icon,color,sessions)=>({id,name,icon,color,unit:'apartados',group:'Asignaturas',period:'total',once:false,log:[],slog:[],cur:0,sessions,goal:sessions.reduce((a,x)=>a+x.n,0)});
-    const add=[
-      mk(101,'Cálculo Teoría','calculo','#0a84ff',S(['Límites',10],['Derivadas',29])),
-      mk(102,'Cálculo Práctica','calculo','#64d2ff',S(['Sesión 5',4],['Sesión 6',12],['Sesión 7',6],['Sesión 8',4],['Sesión 9',20])),
-      mk(103,'FS Teoría','chip','#bf5af2',S(['Tema 3',16],['Problemas',0])),
-      mk(104,'FS Práctica','chip','#ff6482',S(['Sesión 4',4],['Sesión 5',8],['Sesión 6',4])),
-      mk(105,'FP','codigo','#30d158',S(['Sesión 7',7],['Sesión 8',10],['Sesión 9',13])),
-      mk(106,'FFT','atomo','#ff9f0a',S(['Sesión 2',6],['Sesión 3',7],['Sesión 4',5],['Sesión 5',7],['Sesión 6',5],['Sesión 7',7],['Sesión 8',5],['Sesión 10',5],['Sesión 12',4]))
+  if(!localStorage.getItem('progreso.asig2')){
+    const SUBJ=[
+      ['Cálculo Teoría','calculo','#0a84ff',[['Límites',10],['Derivadas',29]]],
+      ['Cálculo Práctica','calculo','#64d2ff',[['Sesión 5',4],['Sesión 6',12],['Sesión 7',6],['Sesión 8',4],['Sesión 9',20]]],
+      ['FS Teoría','chip','#bf5af2',[['Tema 3',16],['Problemas',1]]],
+      ['FS Práctica','chip','#ff6482',[['Sesión 4',4],['Sesión 5',8],['Sesión 6',4]]],
+      ['FP','codigo','#30d158',[['Sesión 7',7],['Sesión 8',10],['Sesión 9',13]]],
+      ['FFT','atomo','#ff9f0a',[['Sesión 2',6],['Sesión 3',7],['Sesión 4',5],['Sesión 5',7],['Sesión 6',5],['Sesión 7',7],['Sesión 8',5],['Sesión 10',5],['Sesión 12',4]]]
     ];
-    for(const t of add)if(!tasks.some(x=>x.name===t.name))tasks.push(t);
-    localStorage.setItem(KEY,JSON.stringify(tasks));localStorage.setItem('progreso.asig1','1');
+    let nid=Math.max(1000,...tasks.map(t=>+t.id||0))+1;
+    for(const [subj,icon,color,ses] of SUBJ){
+      const old=tasks.find(t=>t.name===subj&&t.group==='Asignaturas');
+      for(let i=0;i<ses.length;i++){
+        const [name,n]=ses[i];
+        if(tasks.some(t=>t.group===subj&&t.name===name))continue;
+        const log=old&&old.slog?old.log.filter((_,j)=>old.slog[j]===i):[];
+        tasks.push({id:nid++,name,icon,color,goal:Math.max(n,log.length),unit:'apartados',group:subj,period:'total',once:false,log});
+      }
+      if(old)tasks=tasks.filter(t=>t!==old);
+    }
+    localStorage.setItem(KEY,JSON.stringify(tasks));localStorage.setItem('progreso.asig2','1');localStorage.setItem('progreso.asig1','1');
   }
 }catch(e){}
 /* corrección puntual (se aplica una sola vez): registros de la semana 1 */
@@ -306,7 +316,7 @@ function renderPager(){
   pager.innerHTML=list.map(t=>`<section class="page" data-id="${t.id}" style="--c:${t.color};--d:-${(t.id%6)}s">
     <button class="ringbtn ${pct(t)>=100?'done':''}" style="--c:${t.color}" aria-label="${esc(t.name)}, ${pct(t)}%. Toca para sumar, mantén para ver el nombre">
       ${ring()}<span class="ico">${svg(t.icon)}</span><span class="label">${esc(t.name)}${hasS(t)?`<small class="sl">${esc(sLine(t))}</small>`:''}</span></button>
-      <div class="menu"><button type="button" data-m="edit">Editar</button><button type="button" data-m="del" class="mdel">Eliminar</button></div></section>`).join('')
+      <div class="menu"><button type="button" data-m="minus" aria-label="Quitar una unidad">−1</button><button type="button" data-m="edit">Editar</button><button type="button" data-m="del" class="mdel">Eliminar</button></div></section>`).join('')
    +`<section class="page" data-id="new"><button class="ringbtn new" aria-label="Nueva rueda">${ring(1)}<span class="ico">${svg('plus')}</span>${list.length?'':'<span class="label" style="opacity:1;transform:none">Nueva rueda</span>'}</button></section>`;
   cachePages();draw();settleInert();
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
@@ -584,6 +594,11 @@ pager.addEventListener('click',e=>{
   const mb=e.target.closest('.menu button');
   if(mb){
     const id=mb.closest('.page').dataset.id,t=tasks.find(x=>x.id==id);if(!t)return;
+    if(mb.dataset.m==='minus'){
+      const r=bump(t,-1),bb=mb.getBoundingClientRect();
+      if(r==='ok'){floatAt(bb.left+bb.width/2,bb.top,t,'−1'+(t.unit?' '+t.unit:''));if(navigator.vibrate)navigator.vibrate([8,30,8])}
+      else{mb.classList.remove('shake');void mb.offsetWidth;mb.classList.add('shake')}
+      return}
     if(mb.dataset.m==='edit'){closeMenu();open(id);return}
     if(!mb.classList.contains('arm')){mb.classList.add('arm');mb.textContent='¿Seguro?';return}
     closeMenu();removeTask(t);return;
@@ -600,15 +615,7 @@ pager.addEventListener('click',e=>{
   const bb=b.getBoundingClientRect();
   const x=e.clientX||bb.left+bb.width/2,y=e.clientY||bb.top+bb.height/2,u=t.unit?' '+t.unit:'';
   const now=performance.now();
-  /* doble toque rápido: deshace el +1 del primer toque y resta una unidad */
-  if(lastTap&&lastTap.id===id&&now-lastTap.t<330){
-    if(lastTap.added)bump(t,-1);
-    const r=bump(t,-1);lastTap=null;
-    if(r==='ok'){floatAt(x,y,t,'−1'+u);if(navigator.vibrate)navigator.vibrate([8,30,8])}
-    else{b.classList.remove('shake');void b.offsetWidth;b.classList.add('shake')}
-    return;
-  }
-  const r=bump(t,1);lastTap={id,t:now,added:r==='ok'};
+  const r=bump(t,1);
   if(r==='ok'){floatAt(x,y,t,'+1'+u);b.classList.add('pulse');setTimeout(()=>b.classList.remove('pulse'),180)}
   else if(r.startsWith&&r.startsWith('session:')){floatAt(x,y,t,r.slice(8)+' completada ✓');b.classList.add('pulse');setTimeout(()=>b.classList.remove('pulse'),180)}
   else{floatAt(x,y,t,r==='today'?'Hoy ya ✓':'Completado ✓');b.classList.remove('shake');void b.offsetWidth;b.classList.add('shake')}
@@ -650,6 +657,7 @@ function paintSess(){
       <button type="button" data-a="dec" aria-label="Quitar un apartado">−</button><button type="button" data-a="inc" aria-label="Añadir un apartado">+</button>
       ${done?'':'<button type="button" data-a="rm" class="rm" aria-label="Quitar sesión">×</button>'}</div>`}).join('');
   $('goalBox').hidden=pickS.length>0;
+  $('sessBox').hidden=pickS.length===0;
 }
 $('fSess').addEventListener('input',e=>{const r=e.target.closest('.sr2');if(r&&e.target.classList.contains('sn'))pickS[+r.dataset.i].name=e.target.value});
 $('fSess').addEventListener('click',e=>{
