@@ -47,9 +47,9 @@ body{background:var(--bg);color:var(--ink);font:16px/1.45 Manrope,system-ui,-app
 .page::after{content:'';position:absolute;left:50%;top:calc(100% + 22px);width:calc(var(--s)*.55);height:calc(var(--s)*.06);border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 45%,transparent),transparent);transform:translateX(-50%);animation:shade 6s ease-in-out infinite;animation-delay:var(--d,0s);pointer-events:none}
 .ico svg,.sheet svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .pulse .ico{transform:scale(1.08)}
-.label{position:absolute;top:61%;left:10%;right:10%;text-align:center;font:800 clamp(18px,5.5vw,26px)/1.2 Manrope,system-ui,sans-serif;color:var(--c);opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.label{position:absolute;top:63%;left:10%;right:10%;text-align:center;font:800 clamp(18px,5.5vw,26px)/1.2 Manrope,system-ui,sans-serif;color:var(--c);opacity:1;transform:none;transition:opacity .3s,transform .3s;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .showname .label{opacity:1;transform:none}
-.showname .ico{transform:translateY(-16%) scale(.9)}
+.ringbtn:not(.new) .ico{translate:0 -20%}
 .menu{position:absolute;left:50%;top:calc(50% + var(--s)*.285);display:flex;gap:8px;transform:translate(-50%,8px);opacity:0;pointer-events:none;transition:opacity .3s cubic-bezier(.22,1,.36,1),transform .3s cubic-bezier(.22,1,.36,1);z-index:2}
 .menuon .menu{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 .menu button{height:40px;padding:0 16px;border:0;border-radius:20px;background:var(--track);color:var(--ink);font:800 14px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
