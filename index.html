@@ -98,6 +98,17 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
 .undo{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translate(-50%,20px);opacity:0;pointer-events:none;display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:8px 8px 8px 16px;font-weight:700;font-size:14px;white-space:nowrap;transition:opacity .3s,transform .3s cubic-bezier(.22,1,.36,1);z-index:9}
 .undo.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 .undo button{height:40px;padding:0 16px;border:0;border-radius:12px;background:var(--ink);color:var(--bg);font:800 14px Manrope,system-ui,sans-serif;cursor:pointer}
+.ring.gold{position:absolute;inset:0}.ring.gold .pr{stroke:#ffd60a;transition:stroke-dashoffset .9s cubic-bezier(.22,1,.36,1) .5s}
+.study .mini .ring circle{stroke-width:9}
+.bonus{color:#ffd60a;font-weight:800}
+.medal{color:#ffd60a;font-size:10px;margin-left:1px;vertical-align:top}
+.gsheet{z-index:6}.gsub{color:var(--mute);font-size:14px;margin:6px 0 0}
+.burst{position:fixed;inset:0;display:grid;place-items:center;pointer-events:none;z-index:20}
+.burst i{position:absolute;width:6px;height:28px;border-radius:3px;background:#ffd60a;opacity:0;transform:rotate(var(--a)) translateY(-20px);animation:ray 1.1s cubic-bezier(.22,1,.36,1) var(--d) forwards}
+@keyframes ray{0%{opacity:0;transform:rotate(var(--a)) translateY(-20px) scaleY(.4)}25%{opacity:1}100%{opacity:0;transform:rotate(var(--a)) translateY(-150px) scaleY(1)}}
+.burst b{display:grid;place-items:center;color:#ffd60a;font-size:84px;line-height:1;animation:star 1.8s cubic-bezier(.22,1,.36,1) forwards}
+.burst b span{font-size:18px;font-weight:800;margin-top:10px;color:var(--ink);background:rgba(0,0,0,.75);padding:8px 14px;border-radius:14px}
+@keyframes star{0%{opacity:0;transform:scale(.3) rotate(-30deg)}25%{opacity:1;transform:scale(1.1) rotate(0)}75%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.05)}}
 .hint{color:var(--mute);text-align:center;font-size:15px;line-height:1.5;padding:24px 12px}.hint b{color:var(--ink)}
 .actions .del{color:#e5484d}
 .actions .del.arm{background:#e5484d;color:#fff}
@@ -159,6 +170,13 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
 <div class="undo" id="undo" role="status"><span></span><button type="button" id="undoBtn">Deshacer</button></div>
 
 <div class="scrim" id="scrim"></div>
+<div class="sheet gsheet" id="gsheet" role="dialog" aria-label="Objetivo semanal">
+  <div class="grab"></div>
+  <div class="head"><h2>Objetivo semanal</h2></div>
+  <p class="gsub">Apartados por semana, sumando todas las asignaturas.</p>
+  <div class="step"><button type="button" id="gMinus" aria-label="Bajar">−</button><span id="gVal">10</span><button type="button" id="gPlus" aria-label="Subir">+</button></div>
+  <div class="actions"><button type="button" class="save" id="gSave">Guardar</button></div>
+</div>
 <form class="sheet" id="sheet" autocomplete="off">
   <div class="grab"></div>
   <div class="head"><h2 id="stitle">Nueva rueda</h2><span class="pct" id="spct"></span></div>
@@ -356,10 +374,23 @@ const mondayAgo=(k)=>addDays(monday(),-7*k);
 const inRange=(t,a,b)=>{let n=0;for(const x of t.log)if(x>=a&&x<b)n++;return n};
 function isoWeek(t){const d=new Date(t);d.setHours(0,0,0,0);d.setDate(d.getDate()+3-((d.getDay()+6)%7));
   const w1=new Date(d.getFullYear(),0,4);return 1+Math.round(((d-w1)/DAY-3+((w1.getDay()+6)%7))/7)}
+/* ===== objetivo semanal de estudio (apartados de todas las asignaturas) ===== */
+const MKEY='progreso.meta';
+let STUDY=10;try{STUDY=+localStorage.getItem(MKEY)||10}catch(e){}
+const studyTasks=()=>tasks.filter(t=>t.period==='total');
+function studyIn(a,b){let n=0;for(const t of studyTasks())n+=inRange(t,a,b);return n}
+const studyWeek=(m)=>studyIn(m,addDays(m,7));
 function weekPctFor(m){
+  const base=weekPctBase(m),st=studyTasks().length;
+  if(!st)return base;
+  const sp=Math.min(1,studyWeek(m)/STUDY)*100,nh=tasks.filter(t=>t.period!=='total').length;
+  if(!nh)return Math.round(sp);
+  return Math.round((base*nh+sp)/(nh+1));
+}
+function weekPctBase(m){
   const cur=m===monday(),days=cur?Math.round((dayStart()-m)/DAY)+1:7;
   const ws=tasks.filter(t=>t.period!=='total');
-  if(!ws.length)return cur&&tasks.length?Math.round(tasks.reduce((a,t)=>a+pct(t),0)/tasks.length):0;
+  if(!ws.length)return 0;
   const vals=ws.map(t=>{
     if(t.period==='semana')return Math.min(1,inRange(t,m,addDays(m,7))/t.goal)*100;
     let s=0;for(let i=0;i<days;i++){const a=addDays(m,i);s+=Math.min(1,inRange(t,a,addDays(a,1))/t.goal)}
@@ -399,21 +430,26 @@ function renderSummary(){
   /* desde la semana 1 (inicio) hasta la actual: cada lunes aparece una nueva */
   const N=Math.max(1,Math.round((monday()-START)/(7*DAY))+1);
   const weeks=Array.from({length:N},(_,i)=>{const kk=N-1-i,mm=mondayAgo(kk),p=weekPctFor(mm);
-    return `<button type="button" class="wk ${kk===k?'sel':''} ${p>=100?'full':''}" data-k="${kk}" data-p="${p}" aria-label="Semana ${relWeek(mm)}, ${p}%"><div class="mini">${ring()}</div><span>S${relWeek(mm)}</span></button>`}).join('');
+    return `<button type="button" class="wk ${kk===k?'sel':''} ${p>=100?'full':''}" data-k="${kk}" data-p="${p}" aria-label="Semana ${relWeek(mm)}, ${p}%"><div class="mini">${ring()}</div><span>S${relWeek(mm)}${studyTasks().length&&studyWeek(mm)>STUDY?'<b class="medal">★</b>':''}</span></button>`}).join('');
   const DL='LMXJVSD'.split('').map(c=>`<i>${c}</i>`).join('');
   const sub=k===0?`semana ${relWeek(m)}`:`semana ${relWeek(m)}<br>${fmtD(m)} – ${fmtD(addDays(m,6))}`;
   const stats=new Map(tasks.map(t=>[t,weekStat(t,k)]));
   summary.innerHTML=`<div class="big">${ring()}<div class="num"><b>${wp}%</b><span>${sub}</span>${k?'<em>Volver a esta semana</em>':''}</div></div>
    <div class="weeks">${weeks}</div>
-   <div class="list">${tasks.length?'':'<p class="hint">Aún no tienes ruedas. Desliza hacia arriba y toca el <b>+</b> para crear la primera.</p>'}${(tasks.length?groups():[]).map(g=>`<div class="gh"><span></span><span>${esc(g)}</span><span class="dl">${DL}</span></div>`+
+   <div class="list">${studyTasks().length?(()=>{const n=studyWeek(m),extra=Math.max(0,n-STUDY);
+     const dd=Array.from({length:7},(_,i)=>{const a=addDays(m,i);return `<i class="${studyIn(a,addDays(a,1))?'on':''} ${i===todayI?'today':''}"></i>`}).join('');
+     return `<div class="gh"><span></span><span>Objetivo semanal</span><span class="dl">${DL}</span></div>
+     <div class="srow study" style="--c:var(--ink)" data-study="1"><div class="mini">${ring()}<svg class="ring gold" viewBox="0 0 100 100"><circle class="pr" cx="50" cy="50" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}" data-x="${Math.min(100,Math.round(extra/STUDY*100))}"/></svg><span class="ico">${svg('estudio')}</span></div>
+       <div><div class="nm">Estudio</div><div class="ct">${n}/${STUDY} apartados${extra?` <b class="bonus">★ +${extra}</b>`:''}<br>toca para cambiar el objetivo</div></div><div class="dots">${dd}</div></div>`})():''}${tasks.length?'':'<p class="hint">Aún no tienes ruedas. Desliza hacia arriba y toca el <b>+</b> para crear la primera.</p>'}${(tasks.length?groups():[]).map(g=>`<div class="gh"><span></span><span>${esc(g)}</span><span class="dl">${DL}</span></div>`+
      tasks.filter(t=>t.group===g).map(t=>`<div class="srow" style="--c:${t.color}"><div class="mini">${ring()}<span class="ico">${svg(t.icon)}</span></div>
        <div><div class="nm">${esc(t.name)}</div><div class="ct">${stats.get(t).txt}</div></div><div class="dots">${dots(t)}</div></div>`).join('')).join('')}</div>`;
   const wr=summary.querySelector('.weeks');
   wr.scrollLeft=prevScroll!=null?prevScroll:wr.scrollWidth;
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     summary.querySelector('.big .pr').style.strokeDashoffset=off(wp);
+    const sr=summary.querySelector('.study');if(sr){sr.querySelector('.ring:not(.gold) .pr').style.strokeDashoffset=off(Math.min(100,studyWeek(m)/STUDY*100));const g=sr.querySelector('.gold .pr');g.style.strokeDashoffset=off(+g.dataset.x)}
     summary.querySelectorAll('.wk .pr').forEach(c=>c.style.strokeDashoffset=off(+c.closest('.wk').dataset.p));
-    const rows=summary.querySelectorAll('.srow .pr');let i=0;
+    const rows=summary.querySelectorAll('.srow:not(.study) .pr');let i=0;
     for(const g of groups())for(const t of tasks.filter(t=>t.group===g)){rows[i++].style.strokeDashoffset=off(stats.get(t).p)}
   }));
 }
@@ -439,6 +475,14 @@ function paint(t){
   b.querySelector('.pr').style.strokeDashoffset=off(pct(t));
   b.classList.toggle('done',pct(t)>=100);
   const sl=b.querySelector('.sl');if(sl)sl.textContent=sLine(t);
+}
+function celebrate(){
+  const k='progreso.bonus.'+monday();try{if(localStorage.getItem(k))return;localStorage.setItem(k,'1')}catch(e){}
+  const c=document.createElement('div');c.className='burst';
+  c.innerHTML=Array.from({length:14},(_,i)=>`<i style="--a:${i*360/14}deg;--d:${(i%3)*60}ms"></i>`).join('')+'<b>★<span>¡Objetivo superado!</span></b>';
+  c.addEventListener('animationend',e=>{if(e.target===c)c.remove()});
+  document.body.appendChild(c);setTimeout(()=>c.remove(),2200);
+  if(navigator.vibrate)navigator.vibrate([30,60,30,60,80]);
 }
 function floatAt(x,y,t,txt){
   const s=document.createElement('span');
@@ -648,7 +692,9 @@ pager.addEventListener('click',e=>{
   const bb=b.getBoundingClientRect();
   const x=e.clientX||bb.left+bb.width/2,y=e.clientY||bb.top+bb.height/2,u=t.unit?' '+t.unit:'';
   const now=performance.now();
+  const before=t.period==='total'?studyWeek(monday()):-1;
   const r=bump(t,1);
+  if(before>=0&&(r==='ok'||(r.startsWith&&r.startsWith('session:')))&&before===STUDY)celebrate();
   if(r==='ok'){floatAt(x,y,t,'+1'+u);b.classList.add('pulse');setTimeout(()=>b.classList.remove('pulse'),180)}
   else if(r.startsWith&&r.startsWith('session:')){floatAt(x,y,t,r.slice(8)+' completada ✓');b.classList.add('pulse');setTimeout(()=>b.classList.remove('pulse'),180)}
   else{floatAt(x,y,t,r==='today'?'Hoy ya ✓':'Completado ✓');b.classList.remove('shake');void b.offsetWidth;b.classList.add('shake')}
@@ -656,6 +702,7 @@ pager.addEventListener('click',e=>{
 summary.addEventListener('click',e=>{
   const wk=e.target.closest('.wk');
   if(wk){const k=+wk.dataset.k;selK=selK===k?0:k;renderSummary();if(navigator.vibrate)navigator.vibrate(8);return}
+  if(e.target.closest('.study')){openGoal();return}
   if(e.target.closest('.big')&&selK){selK=0;renderSummary();
     const wr=summary.querySelector('.weeks');wr.scrollTo({left:wr.scrollWidth,behavior:'smooth'});return}
   if(dragged){dragged=false;return}
@@ -725,7 +772,13 @@ function open(id){
   $('sheet').classList.add('on');$('scrim').classList.add('on');
 }
 function close(){$('sheet').classList.remove('on');$('scrim').classList.remove('on');if(document.activeElement)document.activeElement.blur();editing=null}
-$('scrim').addEventListener('click',close);
+$('scrim').addEventListener('click',()=>{close();$('gsheet').classList.remove('on')});
+let gTmp=STUDY;
+function openGoal(){gTmp=STUDY;$('gVal').textContent=gTmp+' apartados';$('gsheet').classList.add('on');$('scrim').classList.add('on')}
+$('gMinus').addEventListener('click',()=>{gTmp=Math.max(1,gTmp-1);$('gVal').textContent=gTmp+' apartados'});
+$('gPlus').addEventListener('click',()=>{gTmp=Math.min(200,gTmp+1);$('gVal').textContent=gTmp+' apartados'});
+$('gSave').addEventListener('click',()=>{STUDY=gTmp;try{localStorage.setItem(MKEY,STUDY)}catch(e){}
+  $('gsheet').classList.remove('on');$('scrim').classList.remove('on');renderSummary()});
 $('sheet').addEventListener('submit',e=>{
   e.preventDefault();
   const name=$('fName').value.trim()||'Rueda';
