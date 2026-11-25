@@ -1,5 +1,5 @@
-// Progreso: funciona sin conexión. Sube VERSION cuando publiques cambios.
-const VERSION = 'progreso-1';
+// Progreso: con conexión carga siempre la última versión; sin conexión usa la copia guardada.
+const VERSION = 'progreso-2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -10,13 +10,24 @@ self.addEventListener('activate', e => {
     .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
-// Muestra lo guardado al instante y actualiza en segundo plano (incluye la fuente de Google).
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const isPage = req.mode === 'navigate' || req.destination === 'document';
+  if (isPage) {
+    // red primero (sin caché HTTP) para que cada actualización se vea a la primera
+    e.respondWith(
+      fetch(req, { cache: 'no-store' })
+        .then(res => { const c = res.clone(); caches.open(VERSION).then(cache => cache.put(req, c)); return res; })
+        .catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
+    );
+    return;
+  }
+  // resto (iconos, fuente): copia guardada al instante y se actualiza en segundo plano
   e.respondWith(caches.open(VERSION).then(async cache => {
-    const hit = await cache.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then(res => {
-      if (res && (res.ok || res.type === 'opaque')) cache.put(e.request, res.clone());
+    const hit = await cache.match(req, { ignoreSearch: true });
+    const net = fetch(req).then(res => {
+      if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
       return res;
     }).catch(() => hit);
     return hit || net;

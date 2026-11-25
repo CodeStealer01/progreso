@@ -222,6 +222,21 @@ let START=null;try{START=+localStorage.getItem(SKEY)||null}catch(e){}
 if(!START){START=monday();try{localStorage.setItem(SKEY,START)}catch(e){}}
 const relWeek=(m)=>Math.round((m-START)/(7*DAY))+1;
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(tasks))}catch(e){}};
+/* corrección puntual (se aplica una sola vez): registros de la semana 1 */
+try{
+  if(!localStorage.getItem('progreso.fix1')){
+    const addOn=(name,y,mo,d,h)=>{const t=tasks.find(x=>x.name===name);if(!t)return;
+      const a=new Date(y,mo,d).getTime(),b=a+DAY;
+      if(!t.log.some(x=>x>=a&&x<b))t.log.push(new Date(y,mo,d,h).getTime());
+      t.log.sort((p,q)=>p-q)};
+    addOn('Gimnasio',2026,10,23,19);   /* lunes 23 nov */
+    addOn('Creatina',2026,10,23,10);   /* lunes 23 nov */
+    addOn('Creatina',2026,10,24,10);   /* martes 24 nov */
+    const w1=new Date(2026,10,23).getTime();
+    if(!START||START>w1){START=w1;localStorage.setItem(SKEY,START)}
+    localStorage.setItem(KEY,JSON.stringify(tasks));localStorage.setItem('progreso.fix1','1');
+  }
+}catch(e){}
 const count=(t)=>{const s=periodStart(t);let n=0;for(const x of t.log)if(x>=s)n++;return n};
 const pct=(t)=>Math.min(100,Math.round(count(t)/t.goal*100));
 const doneToday=(t)=>{const s=dayStart();return t.log.some(x=>x>=s)};
@@ -632,7 +647,7 @@ addEventListener('focus',checkDay);
 addEventListener('resize',()=>{measure();draw()});
 measure();render();flashName();
 /* funciona sin conexión una vez instalada */
-if('serviceWorker' in navigator&&location.protocol==='https:'){try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}}
+if('serviceWorker' in navigator&&location.protocol==='https:'){try{navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(()=>{})}catch(e){}}
 }
 </script>
 </body>
