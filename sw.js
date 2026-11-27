@@ -1,5 +1,5 @@
 // Progreso: con conexión carga siempre la última versión; sin conexión usa la copia guardada.
-const VERSION = 'progreso-2';
+const VERSION = 'progreso-3';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

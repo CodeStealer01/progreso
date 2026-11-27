@@ -33,6 +33,7 @@ body{background:var(--bg);color:var(--ink);font:16px/1.45 Manrope,system-ui,-app
 .ringbtn:active{transform:scale(.97)}
 .moving .ringbtn:active{transform:none}
 .moving .ringbtn,.moving .page::after{animation-play-state:paused}
+.page[inert] .ringbtn,.page[inert]::after{animation:none}
 .moving .page{pointer-events:none}
 .ringbtn:focus-visible{outline:2px solid var(--c);outline-offset:10px}
 .ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);overflow:visible}
@@ -112,6 +113,8 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
 .burst b{display:grid;place-items:center;color:#ffd60a;font-size:84px;line-height:1;animation:star 1.8s cubic-bezier(.22,1,.36,1) forwards}
 .burst b span{font-size:18px;font-weight:800;margin-top:10px;color:var(--ink);background:rgba(0,0,0,.75);padding:8px 14px;border-radius:14px}
 @keyframes star{0%{opacity:0;transform:scale(.3) rotate(-30deg)}25%{opacity:1;transform:scale(1.1) rotate(0)}75%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.05)}}
+.backup{display:flex;gap:8px;margin:28px 0 8px}.backup button{flex:1;height:44px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--mute);font:700 13px Manrope,system-ui,sans-serif;cursor:pointer}
+#bText{width:100%;margin-top:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:12px/1.4 ui-monospace,monospace;padding:10px;resize:none}
 .hint{color:var(--mute);text-align:center;font-size:15px;line-height:1.5;padding:24px 12px}.hint b{color:var(--ink)}
 .actions .del{color:#e5484d}
 .actions .del.arm{background:#e5484d;color:#fff}
@@ -173,6 +176,13 @@ input:focus{outline:2px solid var(--pick);outline-offset:1px}
 <div class="undo" id="undo" role="status"><span></span><button type="button" id="undoBtn">Deshacer</button></div>
 
 <div class="scrim" id="scrim"></div>
+<div class="sheet gsheet" id="bsheet" role="dialog" aria-label="Copia de seguridad">
+  <div class="grab"></div>
+  <div class="head"><h2 id="bTitle">Copia de seguridad</h2></div>
+  <p class="gsub" id="bInfo"></p>
+  <textarea id="bText" rows="5" spellcheck="false"></textarea>
+  <div class="actions"><button type="button" class="save" id="bGo">Restaurar</button></div>
+</div>
 <div class="sheet gsheet" id="gsheet" role="dialog" aria-label="Objetivo semanal">
   <div class="grab"></div>
   <div class="head"><h2 id="gTitle">Objetivo</h2></div>
@@ -360,7 +370,7 @@ function ring(cls){return `<svg class="ring" viewBox="0 0 100 100"><circle class
 const countText=(t)=>{const st=streak(t);return `${count(t)}/${t.goal} ${t.unit||''}`.trim()+(t.period==='dia'?' hoy':t.period==='semana'?(st?` · racha ${st} ${st===1?'semana':'semanas'}`:' esta semana'):'')};
 
 function renderPager(){
-  menuBtn=null;
+  menuBtn=null;clearTimeout(twEnd);tw=null;pager.classList.remove('moving');
   const list=gtasks();
   pager.innerHTML=list.map(t=>`<section class="page" data-id="${t.id}" style="--c:${t.color};--d:-${(t.id%6)}s">
     <button class="ringbtn ${pct(t)>=100?'done':''}" style="--c:${t.color}" aria-label="${esc(t.name)}, ${pct(t)}%. Toca para sumar, mantén para ver el nombre">
@@ -492,7 +502,8 @@ function renderSummary(){
          <div><div class="nm">${esc(g.name)}</div><div class="ct">${l1}<br>${l2}</div></div><div class="dots">${dd}</div></div>`}).join('')})()}
 ${tasks.length?'':'<p class="hint">Aún no tienes ruedas. Desliza hacia arriba y toca el <b>+</b> para crear la primera.</p>'}${(tasks.length?groups():[]).map(g=>`<div class="gh"><span></span><span>${esc(g)}</span><span class="dl">${DL}</span></div>`+
      tasks.filter(t=>t.group===g).map(t=>`<div class="srow" style="--c:${t.color}"><div class="mini">${ring()}<span class="ico">${svg(t.icon)}</span></div>
-       <div><div class="nm">${esc(t.name)}</div><div class="ct">${stats.get(t).txt}</div></div><div class="dots">${dots(t)}</div></div>`).join('')).join('')}</div>`;
+       <div><div class="nm">${esc(t.name)}</div><div class="ct">${stats.get(t).txt}</div></div><div class="dots">${dots(t)}</div></div>`).join('')).join('')}
+     <div class="backup"><button type="button" data-bk="copy">Copiar copia de seguridad</button><button type="button" data-bk="restore">Restaurar copia</button></div></div>`;
   const wr=summary.querySelector('.weeks');
   wr.scrollLeft=prevScroll!=null?prevScroll:wr.scrollWidth;
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
@@ -588,33 +599,50 @@ function draw(){
 }
 /* inert solo se actualiza en reposo: cambiarlo a mitad de giro provoca un tirón */
 function settleInert(){for(let i=0;i<pages.length;i++){const ine=i!==Math.round(pos);if(pstate[i].inert!==ine){pages[i].inert=ine;pstate[i].inert=ine}}}
-/* animación por tiempo (no depende del dedo): curva ease-out suave, igual a 60 y 120 Hz */
-const DUR=820;
+/* animación del giro con Web Animations: se calcula una vez y la ejecuta el compositor del sistema
+   (hilo gráfico), así va fluida aunque la página esté ocupada, igual a 60 y 120 Hz */
+const DUR=820,KF=36;
 const ease=(t)=>1-Math.pow(1-t,4);
-let tw=null;
-function frame(now){
-  if(tw){
-    const t=Math.min(1,(now-tw.t0)/tw.dur);
-    pos=tw.bump?tw.from+Math.sin(Math.PI*t)*tw.bump*(1-t*.3):tw.from+(tw.to-tw.from)*ease(t);
-    if(t>=1){pos=tw.bump?tw.from:tw.to;tw=null}
-  }
-  draw();
-  if(!tw){draw();settleInert();running=false;pager.classList.remove('moving');posBy[curGroup()]=target;return}
-  requestAnimationFrame(frame);
+let tw=null,twEnd=0;
+function tfAt(i,p){
+  const q=i-p,ap=Math.abs(q),a=q*MAXA,k=ap<1?ap:1;
+  return {transform:`translate3d(${(Rw*Math.sin(a)).toFixed(2)}px,${(Rw*(1-Math.cos(a))).toFixed(2)}px,0) rotate(${a.toFixed(4)}rad) scale(${(1-.18*k).toFixed(4)})`,opacity:+(1-.75*k).toFixed(3)};
 }
-function run(){if(running)return;running=true;pager.classList.add('moving');requestAnimationFrame(frame)}
+const twPos=(t)=>tw.bump?tw.from+Math.sin(Math.PI*t)*tw.bump*(1-t*.3):tw.from+(tw.to-tw.from)*ease(t);
+function curPos(){if(!tw)return pos;return twPos(Math.min(1,(performance.now()-tw.t0)/tw.dur))}
+function stopAnims(){for(const pg of pages)for(const an of pg.getAnimations())if(an.id==='giro')an.cancel()}
+function startTween(from,to,dur,bump){
+  pos=from;draw();stopAnims();
+  tw={from,to,dur,bump,t0:performance.now()};
+  const lo=Math.min(from,to)-2.2,hi=Math.max(from,to)+2.2;
+  pager.classList.add('moving');
+  pages.forEach((pg,i)=>{
+    if(i<lo&&i<lo||i>hi)return;
+    if(pstate[i].inert){pg.inert=false;pstate[i].inert=false}
+    const frames=[];
+    for(let k=0;k<=KF;k++){const t=k/KF,f=tfAt(i,twPos(t));f.offset=t;frames.push(f)}
+    pg.animate(frames,{duration:dur,easing:'linear',fill:'forwards',id:'giro'});
+  });
+  clearTimeout(twEnd);twEnd=setTimeout(finishTween,dur+30);
+}
+function finishTween(){
+  if(!tw)return;
+  pos=tw.bump?tw.from:tw.to;tw=null;
+  draw();stopAnims();settleInert();
+  pager.classList.remove('moving');posBy[curGroup()]=target;
+}
 function step(dir){
   const to=clampI(Math.round(target)+dir);
   if(to===Math.round(target)){ /* en el extremo: pequeño rebote que indica que no hay más */
-    if(!tw){tw={from:target,bump:.07*dir,t0:performance.now(),dur:420};run()}
+    if(!tw)startTween(target,target,420,.07*dir);
     return;
   }
   go(to);
 }
 function go(i,instant){
   target=clampI(i);posBy[curGroup()]=target;
-  if(instant||matchMedia('(prefers-reduced-motion:reduce)').matches){tw=null;pos=target;vel=0;draw();settleInert();return}
-  tw={from:pos,to:target,t0:performance.now(),dur:DUR};run();
+  if(instant||matchMedia('(prefers-reduced-motion:reduce)').matches){clearTimeout(twEnd);tw=null;stopAnims();pos=target;vel=0;draw();settleInert();pager.classList.remove('moving');return}
+  startTween(curPos(),target,DUR,0);
 }
 
 /* ===== cambio de grupo (vertical) ===== */
@@ -752,6 +780,7 @@ pager.addEventListener('click',e=>{
 summary.addEventListener('click',e=>{
   const wk=e.target.closest('.wk');
   if(wk){const k=+wk.dataset.k;selK=selK===k?0:k;renderSummary();if(navigator.vibrate)navigator.vibrate(8);return}
+  const bk=e.target.closest('[data-bk]');if(bk){backup(bk.dataset.bk);return}
   const gr=e.target.closest('.study');if(gr){openGoal(gr.dataset.goal);return}
   if(e.target.closest('.big')&&selK){selK=0;renderSummary();
     const wr=summary.querySelector('.weeks');wr.scrollTo({left:wr.scrollWidth,behavior:'smooth'});return}
@@ -822,7 +851,26 @@ function open(id){
   $('sheet').classList.add('on');$('scrim').classList.add('on');
 }
 function close(){$('sheet').classList.remove('on');$('scrim').classList.remove('on');if(document.activeElement)document.activeElement.blur();editing=null}
-$('scrim').addEventListener('click',()=>{close();$('gsheet').classList.remove('on')});
+$('scrim').addEventListener('click',()=>{close();$('gsheet').classList.remove('on');$('bsheet').classList.remove('on')});
+/* ===== copia de seguridad: todos los datos de la app en un texto ===== */
+function dump(){const o={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('progreso.'))o[k]=localStorage.getItem(k)}return JSON.stringify(o)}
+function openB(title,info,text,restore){
+  $('bTitle').textContent=title;$('bInfo').textContent=info;$('bText').value=text;$('bText').readOnly=!restore;
+  $('bGo').hidden=!restore;$('bsheet').classList.add('on');$('scrim').classList.add('on');
+  if(!restore){$('bText').focus();$('bText').select()}
+}
+async function backup(kind){
+  if(kind==='copy'){
+    const txt=dump();let ok=false;try{await navigator.clipboard.writeText(txt);ok=true}catch(e){}
+    openB('Copia de seguridad',ok?'Copiada. Pégala en Notas para guardarla; con ella puedes recuperar todo.':'Selecciona este texto, cópialo y guárdalo en Notas.',txt,false);
+  }else openB('Restaurar copia','Pega aquí la copia que guardaste y pulsa Restaurar. Se sustituirán los datos actuales.','',true);
+}
+$('bGo').addEventListener('click',()=>{
+  try{const o=JSON.parse($('bText').value.trim());if(!o||!o['progreso.datos'])throw 0;
+    for(const k of Object.keys(o))if(k.startsWith('progreso.'))localStorage.setItem(k,o[k]);
+    location.reload();
+  }catch(e){$('bInfo').textContent='Ese texto no es una copia válida. Pega la copia completa.'}
+});
 let gEdit=null;
 const isoD=(t)=>{const d=new Date(t);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
 function openGoal(id){
